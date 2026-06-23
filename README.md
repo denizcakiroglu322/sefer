@@ -1,58 +1,96 @@
-# sefer — prototype
+# Sefer
 
-İstanbul rota motoru. Çekirdek tez: **doğru çıkış saati + doğru sıra.**
-Üstüne köprü seçici, HGS/yakıt maliyeti ve open-meteo hava katmanları.
+**A departure-time–optimizing, multi-stop route planner for Istanbul.** Sefer decides *when to leave* and *in what order to visit your stops* using a time-dependent traffic model — then picks the right Bosphorus crossing while accounting for **directional bridge tolls**.
 
-Sıfır bağımlılık (sadece Node yerleşikleri). Node 18+ gerekir.
+**Live demo:** https://sefer-h98a.onrender.com — hit `/health`, then try the `/day` example below.
+*(Free tier: the first request after a few idle minutes can take ~30s to wake, then it's instant.)*
 
-## Çalıştır
+Zero runtime dependencies — pure Node.js built-ins.
+
+---
+
+## Why this isn't just "sort the stops"
+
+Map apps optimize stop order for a **fixed** start time. The parts that actually bite in Istanbul are the ones Sefer focuses on:
+
+- **Departure-time optimization.** It scans a time window and recommends *when to leave*. A Kadıköy→Maslak hop is ~24 min at midday but ~53 min in the 18:00 peak — timing matters as much as ordering.
+- **Istanbul bridge & toll rules.** 15 Temmuz and FSM are tolled **one-way only** (Asia→Europe); the return is free. YSS is tolled **both directions**. A there-and-back trip is **₺59, not ₺118** — and the planner gets this right per leg.
+- **Time + toll crossing selection.** Each crossing is scored by `drive_time × value-of-time + toll`, so it won't pay ₺285 for the Avrasya Tunnel to save a minute, nor send you far out of the way to a "cheap" bridge whose detour costs an hour.
+- **Deadline mode.** "Be at the last stop by 17:30" → it returns the *latest* departure that still makes it.
+
+---
+
+## Live example — `POST /day`
 
 ```bash
-npm install        # bağımlılık yok, anında biter
-node demo.mjs      # çekirdek motor: tarama + deadline + sıra
-node server.mjs    # HTTP API -> "sefer api :3000"
+curl -s https://sefer-h98a.onrender.com/day \
+  -H 'content-type: application/json' \
+  -d '{
+    "stops": ["Kadikoy", "Besiktas", "Levent", "Maslak", "Kadikoy"],
+    "dwell": { "Besiktas": 45, "Levent": 30, "Maslak": 60 },
+    "window": { "start": "12:00", "end": "18:00" }
+  }'
 ```
 
-Yeni sekmede:
+The response contains:
+
+- `order` — optimized stop sequence (first and last fixed, the middle re-ordered)
+- `recommendedDeparture` / `arrival`, plus `savedByOrdering` (minutes saved vs. your input order)
+- `legs[]` — per leg: drive time, distance, `crossing` (`id`, `direction`) and `tollTRY`
+- `totals` — `drivingMin`, `dwellMin`, `doorToDoorMin`, `fuelTRY`, `tollTRY`, `totalTRY`
+- `weather` — live conditions (rain nudges the traffic estimate)
+
+For the trip above: order `Kadıköy → Maslak → Levent → Beşiktaş → Kadıköy`, leave `12:00`, **total ₺240** — outbound 15 Temmuz at ₺59, **return at ₺0** (one-way rule). Add `"mode": "deadline", "arriveBy": "17:30"` to get the latest departure that still arrives in time.
+
+---
+
+## Endpoints
+
+| Method & path | Purpose |
+|---|---|
+| `GET /health` | liveness check |
+| `POST /scan` | shortest-duration departure within a window (single trip) |
+| `POST /deadline` | latest departure to arrive by a given time |
+| `POST /optimize` | optimal stop order at a reference time |
+| `POST /plan` | one trip: route + crossing + cost + live weather |
+| `POST /day` | **the full flow** — order + departure + per-leg ETA/toll + totals |
+| `GET` / `POST /tours` | list / save named tours |
+
+Locations are either a name (`"Kadikoy"`, resolved via a built-in gazetteer with Nominatim fallback) or `{lat, lng}`.
+
+---
+
+## Architecture
+
+- **No runtime dependencies** — `node:http` + built-ins (`fetch`, `fs`, `url`). Nothing to install.
+- **Traffic model** (`engine.mjs`) — deterministic and parametric: a base level plus Gaussian **morning (08:30)** and **evening (18:00)** peaks defined in `CONFIG`. Same input → same output; the evening peak runs ~2.2× midday. Distance is haversine × a city detour factor.
+- **Geocoding** (`geo.mjs`) — offline gazetteer of Istanbul districts; Nominatim fallback (3 s timeout). Each point carries its Bosphorus side (Europe / Asia).
+- **Crossing selection** (`bridges.mjs`) — four crossings scored by `time × VALUE_OF_TIME_TRY_PER_MIN + directional toll`; value-of-time is a single tunable knob (default 5 ₺/min).
+- **Cost** (`cost.mjs`) — configurable bridge tolls and fuel; directional one-way toll logic.
+- **Weather** (`weather.mjs`) — live Open-Meteo (3 s timeout, graceful offline fallback); rain raises the congestion multiplier.
+
+---
+
+## Run locally
 
 ```bash
-curl -s localhost:3000/health
-curl -s localhost:3000/scan -H 'content-type: application/json' \
-  -d '{"from":"Tuzla","to":"Maslak"}'
-curl -s localhost:3000/plan -H 'content-type: application/json' \
-  -d '{"from":"Kadikoy","to":"Levent"}'
+git clone https://github.com/denizcakiroglu322/sefer.git
+cd sefer
+node server.mjs        # -> "sefer api :3000"   (no install needed: zero dependencies)
 ```
 
-## Uçlar
+Node 18+ (developed on 22). The server reads `PORT` from the environment, defaulting to 3000. `node demo.mjs` exercises the core engine without the HTTP layer.
 
-| Metot+yol        | Ne yapar | Govde |
-|------------------|----------|-------|
-| `GET /health`    | sağlık | — |
-| `POST /geocode`  | konum çöz | `{q}` |
-| `POST /scan`     | en kısa süren çıkış saati | `{from,to,startMin?,endMin?,stepMin?}` |
-| `POST /deadline` | deadline için en geç çıkış | `{from,to,arriveBy:"HH:MM"}` |
-| `POST /optimize` | durak sırası optimizasyonu | `{stops:[...], start?}` |
-| `POST /plan`     | rota + köprü + maliyet + hava | `{from,to,depart?}` |
-| `GET/POST /tours`| kayıtlı turlar | `{name,stops}` |
-| `POST /notify`   | bildirim (stub) | `{title,body}` |
+---
 
-`from/to/stops`: ya `"Tuzla"` gibi isim (gazetteer/Nominatim ile çözülür) ya da `{lat,lng}`.
+## Current limitations & roadmap
 
-## Dosyalar
+Where it honestly stands:
 
-- `engine.mjs` — mesafe + trafik eğrisi, tarama, deadline, 2-opt sıra optimizasyonu
-- `bridges.mjs` — Boğaz geçişi seçici (15 Temmuz / FSM / YSS / Avrasya)
-- `cost.mjs` — HGS toll tablosu + yakıt maliyeti (**örnek değerler, güncelle**)
-- `weather.mjs` — open-meteo güncel hava (offline'da zarif düşüş)
-- `geo.mjs` — İstanbul gazetteer + Nominatim canlı yedek
-- `server.mjs` — HTTP API
-- `demo.mjs` — çekirdek tez demosu
+- **Traffic is modeled, not measured — yet.** The curve is synthetic but realistic (midday ≈ baseline, evening ≈ 2.2× midday). Because `CONFIG` is parametric, wiring in **real İBB hourly traffic data** is the planned next step — a data/calibration change, not a rewrite.
+- **The crossing affects toll, not yet drive time.** A leg's duration is straight-line × detour and doesn't yet route *through* the chosen bridge (approach/egress time). Crossing *selection* is correct; folding bridge geometry into the duration is the next modeling step.
+- **No persistence on the live demo.** Saved tours live in `tours.json`, which is ephemeral on the free tier (resets on restart). A real datastore is future work.
 
-## İnce ayar (önemli)
+---
 
-Trafik eğrisi, hız ve geçiş/yakıt fiyatları **sabit** ve dosya başlarında:
-- `engine.mjs` → `CONFIG` (detour, freeFlowKmh, sabah/akşam zirve)
-- `cost.mjs` → `TOLLS_TRY`, `FUEL`
-
-Bunlar deterministik bir model; gerçek ölçümle (Google Directions vb.) kalibre
-edip senin gerçek figürlerine oturtursun.
+Built from scratch as a focused prototype: a real Istanbul problem (timing + cross-Bosphorus multi-stop trips), a deterministic engine, and no framework.
