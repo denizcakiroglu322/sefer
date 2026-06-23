@@ -1,0 +1,14 @@
+{
+  "name": "sefer-prototype",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Istanbul rota motoru: cikis saati taramasi + sira optimizasyonu + kopru/hava/maliyet",
+  "scripts": {
+    "start": "node server.mjs",
+    "demo": "node demo.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

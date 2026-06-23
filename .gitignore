@@ -1,0 +1,10 @@
+# bagimlilik / uretilenler (proje sifir-bagimlilik; yine de guvenli)
+node_modules/
+
+# yerel / oturum artiklari
+.claude/
+*.bak
+.DS_Store
+
+# calisma zamani durumu — deploy'da kalici degil, commit'leme
+tours.json
