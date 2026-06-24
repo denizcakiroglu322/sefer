@@ -5,6 +5,7 @@
 import { haversineKm, travelMinutes, fmt } from "./engine.mjs";
 import { sideOf } from "./geo.mjs";
 import { tollFor } from "./cost.mjs";
+import { noCongestion } from "./congestion.mjs";
 
 export const CROSSINGS = [
   { id: "15temmuz", name: "15 Temmuz Sehitler Koprusu", lat: 41.0450, lng: 29.0350, type: "bridge" },
@@ -23,6 +24,7 @@ export const VALUE_OF_TIME_TRY_PER_MIN = 5;
 export function chooseCrossing(from, to, opts = {}) {
   const refMin = opts.refMin ?? 12 * 60;
   const rainBoost = opts.rainBoost ?? 0;
+  const congestion = opts.congestion ?? noCongestion;   // topluluk boost saglayici (default no-op)
   const fromSide = sideOf(from), toSide = sideOf(to);
   if (fromSide === toSide) {
     return { needed: false, side: fromSide, note: "Ayni yaka — Bogaz gecisi gerekmiyor." };
@@ -35,14 +37,15 @@ export function chooseCrossing(from, to, opts = {}) {
   const ranked = CROSSINGS.map((c) => {
     const approach = travelMinutes(from, c, refMin, rainBoost).minutes;
     const egress = travelMinutes(c, to, refMin + approach, rainBoost).minutes;
-    const totalMin = fmt.round1(approach + egress);
+    const sev = congestion(c.id, direction, refMin);               // per-aday topluluk boost (sinyal yoksa 0)
+    const totalMin = fmt.round1((approach + egress) * (1 + sev));  // yalniz tikali kopru siser -> yeniden-rotalar
     const toll = tollFor(c.id, direction);
     return {
       id: c.id, name: c.name, type: c.type,
       approachMin: approach, egressMin: egress,
       totalMin,
       detourKm: fmt.round1(haversineKm(from, c) + haversineKm(c, to)),
-      toll,
+      toll, sev,
       score: fmt.round1(totalMin * VOT + toll)   // zaman+ucret genel maliyeti
     };
   }).sort((a, b) => a.score - b.score);

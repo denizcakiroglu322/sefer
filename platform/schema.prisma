@@ -1,0 +1,130 @@
+// sefer — community platform layer
+// SEPARATE stack from the zero-dep engine (Fastify + Prisma + Supabase/Postgres).
+// The engine is consumed as a library; this schema never touches it.
+// Identity lives in Supabase Auth; User here is a profile mirror + role only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Supabase connection string
+}
+
+// Hierarchical: REGISTERED < APPROVED_CONTRIBUTOR < MODERATOR < ADMIN
+//   submit     : >= APPROVED_CONTRIBUTOR
+//   moderate   : >= MODERATOR
+//   grant role : ADMIN
+// Enforced in Fastify (JWT verify + role check). Postgres RLS deferred.
+enum Role {
+  REGISTERED
+  APPROVED_CONTRIBUTOR
+  MODERATOR
+  ADMIN
+}
+
+enum SubmissionType {
+  TRAFFIC
+  NEWS
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Boğaz crossing direction — mirrors the engine's `direction` literal verbatim.
+enum Direction {
+  A2E // Asia  -> Europe
+  E2A // Europe -> Asia
+}
+
+// id = Supabase auth.users.id (uuid). Role + profile only; NO credentials here.
+model User {
+  id          String   @id @db.Uuid
+  role        Role     @default(REGISTERED)
+  displayName String?
+  createdAt   DateTime @default(now())
+
+  submissions    Submission[]       @relation("author")
+  moderated      Submission[]       @relation("moderator")
+  signalsCreated CongestionSignal[]
+  auditLogs      AuditLog[]
+}
+
+// Shared pipeline: TRAFFIC and NEWS in one table, two types.
+// Moderation mechanism is built once, used for both feeds (/feed/trafik, /feed/haber).
+model Submission {
+  id     String           @id @default(cuid())
+  type   SubmissionType
+  status SubmissionStatus @default(PENDING)
+  text   String
+
+  author   User   @relation("author", fields: [authorId], references: [id])
+  authorId String @db.Uuid
+
+  // TRAFFIC-only raw user input (optional). Target comes from a dropdown, not free text.
+  // crossingId validated app-side against the engine's 4-value set.
+  lat          Float?
+  lng          Float?
+  crossingId   String?    // engine crossing.id flagged: "15temmuz" | "fsm" | "yss" | "avrasya"
+  direction    Direction?
+  userSeverity Int?       // felt severity 1-5 (mapped to a fraction at approval)
+
+  // Moderation trail
+  moderatedBy   User?     @relation("moderator", fields: [moderatedById], references: [id])
+  moderatedById String?   @db.Uuid
+  moderatedAt   DateTime?
+  rejectReason  String?
+
+  // Approved TRAFFIC -> normalized engine-facing signal (1-1). NEWS never produces one.
+  signal CongestionSignal?
+
+  createdAt DateTime @default(now())
+
+  @@index([type, status]) // feed queries
+}
+
+// ENGINE-FACING table. Derived from a messy Submission at approval time.
+// The engine reads ONLY this (never Submission). Engine stays clean.
+model CongestionSignal {
+  id           String     @id @default(cuid())
+  submission   Submission @relation(fields: [submissionId], references: [id])
+  submissionId String     @unique
+
+  // Field-for-field match with the engine provider: (crossingId, direction, minuteOfDay).
+  // crossingId stores the engine's literal id verbatim — no translation layer.
+  crossingId String    // "15temmuz" | "fsm" | "yss" | "avrasya"
+  direction  Direction
+
+  // rainBoost-shaped fraction (0.20 = +20%). Final value after the 1-5 map + moderator override.
+  // Engine applies it BRIDGE-SIDE, not inside congestionAt:
+  //   candidate totalMin *= (1 + maxActiveSeverity(crossingId, direction, t))
+  // The max() over concurrent signals lives in the provider (platform), not the engine.
+  severity Float
+
+  validFrom  DateTime @default(now())
+  validUntil DateTime // set app-side at approval = validFrom + 90 min (moderator-extendable)
+
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  // Provider query: active signal for this crossing+direction at time T.
+  @@index([crossingId, direction, validUntil])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actor      User     @relation(fields: [actorId], references: [id])
+  actorId    String   @db.Uuid
+  action     String   // SUBMISSION_APPROVED | SUBMISSION_REJECTED | CONTRIBUTOR_GRANTED | ROLE_CHANGED
+  targetType String   // "Submission" | "User"
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+}

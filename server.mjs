@@ -27,6 +27,7 @@ import { chooseCrossing } from "./bridges.mjs";
 import { tripCost, tollFor, fuelCost, PARKING_TRY_PER_STOP } from "./cost.mjs";
 import { getWeather } from "./weather.mjs";
 import { transitLeg, applyFareLadder } from "./transit.mjs";
+import { noCongestion } from "./congestion.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOURS_FILE = join(__dirname, "tours.json");
@@ -130,7 +131,7 @@ function orderFixedEnds(pts, refMin, rainBoost) {
 
 // Verilen sira + kalkis icin gunu bacak bacak simule et; saat dwell'lerle ilerler.
 // withTransit=true ise her bacaga transit secenegi eklenir (yalniz nihai planda; tarama hizli kalsin).
-function simulateDay(pts, departMin, dwellOf, rainBoost, withTransit = false) {
+function simulateDay(pts, departMin, dwellOf, rainBoost, withTransit = false, congestion = noCongestion) {
   let clock = departMin, drivingMin = 0, dwellMin = 0, totalKm = 0, tollTRY = 0;
   const legs = [];
   let tRide = 0, tWait = 0, tWalk = 0, tTotal = 0, tFeasible = 0, tFailNote = null;
@@ -139,17 +140,20 @@ function simulateDay(pts, departMin, dwellOf, rainBoost, withTransit = false) {
     const a = pts[i], b = pts[i + 1];
     const legDepartMin = clock;
     const leg = travelMinutes(a, b, clock, rainBoost);
-    const cr = chooseCrossing(a, b, { refMin: clock, rainBoost });
+    const cr = chooseCrossing(a, b, { refMin: clock, rainBoost, congestion });
     const crossingId = cr.needed ? cr.best.id : null;
     const direction = cr.needed
       ? (cr.from === "ASIA" && cr.to === "EU" ? "A2E"
          : cr.from === "EU" && cr.to === "ASIA" ? "E2A" : null)
       : null;
+    // secilen kopru tikaliysa (topluluk sinyali) bacak ETA'si da onu yansitir; sinyal yoksa sev=0 -> degismez
+    const sev = cr.needed ? (cr.best.sev || 0) : 0;
+    const legMin = fmt.round1(leg.minutes * (1 + sev));
     const toll = crossingId ? tollFor(crossingId, direction) : 0;
     const legObj = {
       from: a.name, to: b.name,
-      depart: fmt.hhmm(legDepartMin), arrive: fmt.hhmm(legDepartMin + leg.minutes),
-      durationMin: leg.minutes, distanceKm: leg.km,
+      depart: fmt.hhmm(legDepartMin), arrive: fmt.hhmm(legDepartMin + legMin),
+      durationMin: legMin, distanceKm: leg.km,
       crossing: crossingId ? { id: crossingId, name: cr.best.name, direction } : null,
       tollTRY: toll
     };
@@ -165,8 +169,8 @@ function simulateDay(pts, departMin, dwellOf, rainBoost, withTransit = false) {
       }
     }
     legs.push(legObj);
-    clock = legDepartMin + leg.minutes;
-    drivingMin += leg.minutes; totalKm += leg.km; tollTRY += toll;
+    clock = legDepartMin + legMin;
+    drivingMin += legMin; totalKm += leg.km; tollTRY += toll;
     // ara durakta (son degilse) bekleme/toplanti suresi ekle
     if (i + 1 < pts.length - 1) { const d = dwellOf(b.name); clock += d; dwellMin += d; }
   }
