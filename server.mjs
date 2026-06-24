@@ -9,7 +9,7 @@
 //   POST /deadline   {from,to,arriveBy("HH:MM" | dakika)}
 //   POST /optimize   {stops:[{name,lat,lng}|"isim"], start?("HH:MM" referans saat), origin?({lat,lng}|"isim" sabit baslangic)}
 //   POST /plan       {from,to,depart?}      -> rota+kopru+maliyet+hava
-//   POST /day        {stops,dwell?,window?,mode?,arriveBy?,optimizeOrder?} -> tum gun: sira+kalkis+ETA+maliyet
+//   POST /day        {stops,dwell?,window?,mode?,arriveBy?,optimizeOrder?} -> tum gun, COK-MODLU (araç vs toplu): sira+kalkis+ETA+maliyet+modes
 //   GET  /tours                             -> kayitli turlar
 //   POST /tours      {name, stops}          -> tur kaydet
 //   POST /notify     {title, body}          -> bildirim (stub: loglar)
@@ -24,8 +24,9 @@ import { dirname, join } from "node:path";
 import { geocode } from "./geo.mjs";
 import { scanDeparture, latestDeparture, optimizeSequence, travelMinutes, fmt } from "./engine.mjs";
 import { chooseCrossing } from "./bridges.mjs";
-import { tripCost, tollFor, fuelCost } from "./cost.mjs";
+import { tripCost, tollFor, fuelCost, PARKING_TRY_PER_STOP } from "./cost.mjs";
 import { getWeather } from "./weather.mjs";
+import { transitLeg, applyFareLadder } from "./transit.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOURS_FILE = join(__dirname, "tours.json");
@@ -128,11 +129,15 @@ function orderFixedEnds(pts, refMin, rainBoost) {
 }
 
 // Verilen sira + kalkis icin gunu bacak bacak simule et; saat dwell'lerle ilerler.
-function simulateDay(pts, departMin, dwellOf, rainBoost) {
+// withTransit=true ise her bacaga transit secenegi eklenir (yalniz nihai planda; tarama hizli kalsin).
+function simulateDay(pts, departMin, dwellOf, rainBoost, withTransit = false) {
   let clock = departMin, drivingMin = 0, dwellMin = 0, totalKm = 0, tollTRY = 0;
   const legs = [];
+  let tRide = 0, tWait = 0, tWalk = 0, tTotal = 0, tFeasible = 0, tFailNote = null;
+  const tBoardings = [];
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
+    const legDepartMin = clock;
     const leg = travelMinutes(a, b, clock, rainBoost);
     const cr = chooseCrossing(a, b, { refMin: clock, rainBoost });
     const crossingId = cr.needed ? cr.best.id : null;
@@ -141,25 +146,57 @@ function simulateDay(pts, departMin, dwellOf, rainBoost) {
          : cr.from === "EU" && cr.to === "ASIA" ? "E2A" : null)
       : null;
     const toll = crossingId ? tollFor(crossingId, direction) : 0;
-    const departHHMM = fmt.hhmm(clock);
-    clock += leg.minutes;
-    legs.push({
+    const legObj = {
       from: a.name, to: b.name,
-      depart: departHHMM, arrive: fmt.hhmm(clock),
+      depart: fmt.hhmm(legDepartMin), arrive: fmt.hhmm(legDepartMin + leg.minutes),
       durationMin: leg.minutes, distanceKm: leg.km,
       crossing: crossingId ? { id: crossingId, name: cr.best.name, direction } : null,
       tollTRY: toll
-    });
+    };
+    if (withTransit) {
+      const t = transitLeg(a, b, legDepartMin);
+      if (t.feasible) {
+        legObj.transit = { feasible: true, totalMin: t.totalMin, fareTRY: t.fareTRY, departBoard: t.departBoard, summary: t.summary };
+        tRide += t.rideMin; tWait += t.waitMin; tWalk += t.walkMin; tTotal += t.totalMin; tFeasible++;
+        tBoardings.push(...t.boardings);
+      } else {
+        legObj.transit = { feasible: false, note: t.note };
+        if (!tFailNote) tFailNote = `${a.name}→${b.name}: ${t.note}`;
+      }
+    }
+    legs.push(legObj);
+    clock = legDepartMin + leg.minutes;
     drivingMin += leg.minutes; totalKm += leg.km; tollTRY += toll;
     // ara durakta (son degilse) bekleme/toplanti suresi ekle
     if (i + 1 < pts.length - 1) { const d = dwellOf(b.name); clock += d; dwellMin += d; }
   }
-  return {
+  const out = {
     legs,
     drivingMin: fmt.round1(drivingMin), dwellMin,
     arrivalMin: clock, doorToDoorMin: fmt.round1(clock - departMin),
     totalKm: fmt.round1(totalKm), tollTRY
   };
+  if (withTransit) {
+    out.transit = {
+      rideMin: fmt.round1(tRide), waitMin: fmt.round1(tWait), walkMin: fmt.round1(tWalk),
+      totalMin: fmt.round1(tTotal), boardings: tBoardings,
+      feasibleLegs: tFeasible, totalLegs: pts.length - 1, failNote: tFailNote
+    };
+  }
+  return out;
+}
+
+// Transit gunu: her bacak transitLeg ile; saat transit varislariyla ilerler.
+// Bir bacak bile infeasible -> tum gun infeasible (deadline modunda son-tren farkindaligi icin).
+function simulateTransitDay(pts, departMin, dwellOf) {
+  let clock = departMin;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const t = transitLeg(pts[i], pts[i + 1], clock);
+    if (!t.feasible) return { feasible: false, failAt: `${pts[i].name}→${pts[i + 1].name}`, note: t.note };
+    clock = t.arriveMin;
+    if (i + 1 < pts.length - 1) clock += dwellOf(pts[i + 1].name);
+  }
+  return { feasible: true, arrivalMin: clock };
 }
 
 const HELP = `sefer api
@@ -168,7 +205,7 @@ POST /scan      {from,to}                 en kisa suren kalkis saati
 POST /deadline  {from,to,arriveBy}        deadline icin en gec kalkis
 POST /optimize  {stops:[...]}             durak sirasini optimize et
 POST /plan      {from,to,depart?}         rota + kopru + maliyet + hava
-POST /day       {stops,dwell?,window?,mode?}  tum gunu planla: sira+kalkis+ETA+maliyet
+POST /day       {stops,dwell?,window?,mode?}  tum gun cok-modlu: araç vs toplu (sira+kalkis+ETA+maliyet)
 GET  /tours  |  POST /tours {name,stops}  kayitli turlar
 POST /geocode   {q}                       konum cozumle
 POST /notify    {title,body}              bildirim (stub)
@@ -263,32 +300,83 @@ const routes = {
         };
     }
 
+    // Nihai plan icin transit-li yeniden simule et (tarama hizli kalsin diye yalniz burada).
+    const finalSim = simulateDay(orderedPts, best.depart, dwellOf, rainBoost, true);
+
     // savedByOrdering: ayni kalkista girdi sirasi vs optimize sira (surus dk farki)
     const baseSim = simulateDay(pts, best.depart, dwellOf, rainBoost);
-    const savedByOrdering = fmt.round1(baseSim.drivingMin - best.sim.drivingMin);
+    const savedByOrdering = fmt.round1(baseSim.drivingMin - finalSim.drivingMin);
 
-    // 5) maliyet: yakit TOPLAM mesafe uzerinden + yon-duyarli toplam toll
-    const fuelTRY = fuelCost(best.sim.totalKm);
-    const tollTRY = best.sim.tollTRY;
+    // 5) ARAÇ maliyeti: yakit (toplam mesafe) + yon-duyarli toll. (Ust-seviye totals DEGISMEZ.)
+    const fuelTRY = fuelCost(finalSim.totalKm);
+    const tollTRY = finalSim.tollTRY;
 
-    return {
+    // otopark: ilk durak (cikis) ve eve-donus haric, durulan duraklar
+    const lastIsOrigin = orderedPts.length > 1 && orderedPts[0].name === orderedPts[orderedPts.length - 1].name;
+    const parkingStops = Math.max(0, (orderedPts.length - 1) - (lastIsOrigin ? 1 : 0));
+    const parkingTRY = PARKING_TRY_PER_STOP * parkingStops;
+
+    // gun-seviye transit: 90-dk aktarma merdiveniyle ucret + feasibility
+    const ts = finalSim.transit;
+    const transitFareDay = applyFareLadder(ts.boardings);
+    const transitFeasible = ts.feasibleLegs === ts.totalLegs;
+    const modes = {
+      car: {
+        doorToDoorMin: finalSim.doorToDoorMin, drivingMin: finalSim.drivingMin,
+        fuelTRY, tollTRY, parkingTRY, totalTRY: fuelTRY + tollTRY + parkingTRY
+      },
+      transit: {
+        doorToDoorMin: fmt.round1(ts.totalMin + finalSim.dwellMin),
+        rideMin: ts.rideMin, waitMin: ts.waitMin, walkMin: ts.walkMin,
+        fareTRY: transitFareDay, feasibleLegs: ts.feasibleLegs, totalLegs: ts.totalLegs,
+        totalTRY: transitFareDay, feasible: transitFeasible,
+        note: transitFeasible ? null : ts.failNote
+      }
+    };
+
+    // PART 3 — deadline modunda transit son-tren / deadline farkindaligi
+    let transitDeadline = null;
+    if (mode === "deadline") {
+      let tBest = null, firstFail = null;
+      for (let d = winStart; d <= winEnd; d += STEP) {
+        const sim = simulateTransitDay(orderedPts, d, dwellOf);
+        if (sim.feasible && sim.arrivalMin <= arriveBy) tBest = d;
+        else if (!sim.feasible && !firstFail) firstFail = sim;
+      }
+      if (tBest != null) {
+        const probe = simulateTransitDay(orderedPts, tBest + STEP, dwellOf);
+        let limitingLine = "deadline", note = `${fmt.hhmm(arriveBy)} deadline bağlayıcı (son tren değil)`;
+        if (!probe.feasible) { limitingLine = probe.failAt; note = `son sefer/uygunluk sınırı: ${probe.note}`; }
+        transitDeadline = { feasible: true, lastFeasibleDeparture: fmt.hhmm(tBest), limitingLine, note };
+      } else {
+        transitDeadline = {
+          feasible: false,
+          note: firstFail ? `${firstFail.failAt}: ${firstFail.note}` : `transit ${fmt.hhmm(arriveBy)} deadline'ina yetişemiyor`
+        };
+      }
+    }
+
+    const out = {
       mode,
       order: orderedPts.map((p) => p.name),
       recommendedDeparture: fmt.hhmm(best.depart),
-      arrival: fmt.hhmm(best.sim.arrivalMin),
+      arrival: fmt.hhmm(finalSim.arrivalMin),
       savedByOrdering,
-      legs: best.sim.legs,
+      legs: finalSim.legs,
       totals: {
-        drivingMin: best.sim.drivingMin,
-        dwellMin: best.sim.dwellMin,
-        doorToDoorMin: best.sim.doorToDoorMin,
-        distanceKm: best.sim.totalKm,
+        drivingMin: finalSim.drivingMin,
+        dwellMin: finalSim.dwellMin,
+        doorToDoorMin: finalSim.doorToDoorMin,
+        distanceKm: finalSim.totalKm,
         fuelTRY,
         tollTRY,
         totalTRY: fuelTRY + tollTRY
       },
+      modes,
       weather: wx
     };
+    if (transitDeadline) out.transitDeadline = transitDeadline;
+    return out;
   },
 
   "POST /plan": async (body) => {

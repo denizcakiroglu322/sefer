@@ -14,6 +14,9 @@ export const FUEL = {
   litersPer100km: 8.0       // ornek tuketim
 };
 
+// Otopark: durak basina ortalama (araç modu gun maliyetine eklenir).
+export const PARKING_TRY_PER_STOP = 50;
+
 // Tek yon ucretlenen kopruler: yalnizca Anadolu->Avrupa (A2E) yonunde ucret alinir,
 // donus (E2A) bedava. yss/avrasya her gecepte ucretlendirilir.
 export const ONE_WAY_TOLLS = new Set(["15temmuz", "fsm"]);
