@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sefer — İstanbul çok-modlu gün planlayıcı</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#EFEDE6;--card:#fff;--accent:#0E9F6E;--accent-dk:#0F6E56;--ink:#1A1D1A;--muted:#6B6F69;--faint:#A0A49B;--line:#ECE8E0;--chip:#F1EFE8;--warn:#9A3412;--warn-bg:#FAECE7;--tr:#E1F5EE;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;line-height:1.5;}
+  .wrap{max-width:560px;margin:0 auto;padding:26px 16px 64px;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  .display{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-0.02em;}
+  .head{display:flex;align-items:center;gap:12px;margin-bottom:18px;}
+  .logo{width:38px;height:38px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;}
+  .label{font-size:11.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--faint);}
+  input,select,button{font-family:inherit;font-size:14px;color:var(--ink);}
+  .in{padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;}
+  .srow{display:flex;gap:7px;align-items:center;margin-bottom:7px;}
+  .sname{flex:1;}.sdwell{width:74px;}
+  .x{border:1px solid var(--line);background:#fff;border-radius:8px;width:34px;height:34px;cursor:pointer;color:var(--muted);flex:none;}
+  .btn{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:500;cursor:pointer;}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .btn[disabled]{opacity:.55;cursor:default;}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;}
+  .seg button{border:0;background:transparent;padding:8px 13px;cursor:pointer;color:var(--muted);font-weight:500;}
+  .seg button.on{background:var(--accent);color:#fff;}
+  .leg{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 14px;margin-bottom:9px;}
+  .opts{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;}
+  .opt{flex:1 1 180px;font-size:12.5px;border-radius:9px;padding:8px 10px;}
+  .opt.car{background:var(--chip);}.opt.tr{background:var(--tr);color:var(--accent-dk);}.opt.no{background:var(--warn-bg);color:var(--warn);}
+  .ico{display:inline-flex;vertical-align:-3px;margin-right:3px;}
+  .metric{flex:1;border-radius:13px;padding:13px 14px;border:1px solid var(--line);background:#fff;}
+  .big{font-family:'JetBrains Mono';font-weight:600;font-size:22px;}
+  .muted{color:var(--muted);}.faint{color:var(--faint);}
+  #banner{background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;border-radius:11px;padding:10px 13px;font-size:13px;margin-bottom:12px;display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div class="logo" id="logo" aria-hidden="true"></div>
+    <div>
+      <div class="display" style="font-weight:700;font-size:22px;line-height:1;">Sefer</div>
+      <div class="muted" style="font-size:12.5px;margin-top:3px;">İstanbul çok-modlu gün planlayıcı · araç vs toplu taşıma</div>
+    </div>
+  </header>
+
+  <section class="card" style="margin-bottom:16px;" aria-label="Plan formu">
+    <div class="label" style="margin-bottom:10px;">Duraklar — sıra · bekleme (dk)</div>
+    <div id="stops"></div>
+    <button class="btn" id="addStop" style="font-size:13px;padding:7px 12px;">+ durak</button>
+    <div style="display:flex;gap:16px;margin-top:15px;flex-wrap:wrap;align-items:flex-end;">
+      <div>
+        <div class="label" style="margin-bottom:5px;">Pencere</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input class="in mono" id="winStart" value="12:00" style="width:78px;" aria-label="pencere başlangıç">
+          <span class="faint">–</span>
+          <input class="in mono" id="winEnd" value="18:00" style="width:78px;" aria-label="pencere bitiş">
+        </div>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:5px;">Görünüm</div>
+        <div class="seg" id="seg">
+          <button data-m="compare" class="on">Karşılaştır</button>
+          <button data-m="car">Araç</button>
+          <button data-m="transit">Toplu</button>
+        </div>
+      </div>
+      <button class="btn primary" id="plan" style="margin-left:auto;">Planla</button>
+    </div>
+    <div class="faint" style="font-size:11.5px;margin-top:11px;">Canlı API'ye bağlı. İlk istek ~30 sn sürebilir (ücretsiz katman uykudan uyanır).</div>
+  </section>
+
+  <div id="banner" role="status"></div>
+  <div id="out"></div>
+</div>
+
+<script>
+const REF = {"mode":"shortest","order":["Kadikoy","Maslak","Levent","Besiktas","Kadikoy"],"recommendedDeparture":"12:00","arrival":"15:06","savedByOrdering":1.5,"legs":[{"from":"Kadikoy","to":"Maslak","durationMin":23.9,"crossing":{"id":"15temmuz","name":"15 Temmuz","direction":"A2E"},"tollTRY":59,"transit":{"feasible":true,"totalMin":69.3,"fareTRY":65.27,"departBoard":"12:15","summary":"Marmaray→M2 (aktarma: Yenikapı)"}},{"from":"Maslak","to":"Levent","durationMin":6,"crossing":null,"tollTRY":0,"transit":{"feasible":true,"totalMin":24.6,"fareTRY":42,"departBoard":"13:36","summary":"M2 (Atatürk Oto Sanayi→Levent)"}},{"from":"Levent","to":"Besiktas","durationMin":8.1,"crossing":null,"tollTRY":0,"transit":{"feasible":false,"note":"bu çift için uygun hat/vapur yok"}},{"from":"Besiktas","to":"Kadikoy","durationMin":12.6,"crossing":{"id":"15temmuz","name":"15 Temmuz","direction":"E2A"},"tollTRY":0,"transit":{"feasible":true,"totalMin":47,"fareTRY":42,"departBoard":"15:20","summary":"Vapur (Beşiktaş→Kadıköy)"}}],"modes":{"car":{"doorToDoorMin":185.6,"drivingMin":50.6,"fuelTRY":181,"tollTRY":59,"parkingTRY":150,"totalTRY":390},"transit":{"doorToDoorMin":275.9,"rideMin":74,"waitMin":40.5,"walkMin":26.4,"fareTRY":131.29,"feasibleLegs":3,"totalLegs":4,"totalTRY":131.29,"feasible":false,"note":"Levent→Besiktas: uygun hat yok"}}};
+
+const SV = (p,s) => `<svg class="ico" viewBox="0 0 24 24" width="${s||16}" height="${s||16}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICON = {
+  route: SV('<circle cx="6" cy="19" r="2.6"/><circle cx="18" cy="5" r="2.6"/><path d="M8.6 19H16a3.4 3.4 0 0 0 0-7H7a3.4 3.4 0 0 1 0-7h1.4"/>',20),
+  car: SV('<path d="M5 16l1.2-4.2A2 2 0 0 1 8.1 10h7.8a2 2 0 0 1 1.9 1.4L19 16M4 16h16v3h-2v-1H6v1H4z"/><circle cx="7.5" cy="16.5" r="1.2"/><circle cx="16.5" cy="16.5" r="1.2"/>'),
+  train: SV('<rect x="6" y="3" width="12" height="12" rx="2.5"/><path d="M6 11h12M9 18l-2 3M15 18l2 3"/><circle cx="9.5" cy="7.5" r=".6"/><circle cx="14.5" cy="7.5" r=".6"/>'),
+  ship: SV('<path d="M3 14l9-3.5L21 14l-1.8 5.5a1.5 1.5 0 0 1-1.4 1H6.2a1.5 1.5 0 0 1-1.4-1z"/><path d="M12 10.5V5H8"/>'),
+  alert: SV('<path d="M10.3 4.2 2.5 18a1.8 1.8 0 0 0 1.6 2.7h15.8A1.8 1.8 0 0 0 21.5 18L13.7 4.2a1.8 1.8 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/>')
+};
+
+let lastDay = REF, view = "compare";
+const $ = (id) => document.getElementById(id);
+const r0 = (n) => Math.round(n);
+
+function crossingTxt(leg){
+  if(!leg.crossing) return "köprü yok";
+  const nm = leg.crossing.id === "15temmuz" ? "15 Temmuz" : leg.crossing.id.toUpperCase();
+  return `${nm} ${leg.crossing.direction} <b class="mono">₺${leg.tollTRY}</b>`;
+}
+
+function render(day){
+  lastDay = day;
+  const c = day.modes.car, t = day.modes.transit;
+  const showCar = view !== "transit", showTr = view !== "car";
+  let h = `<div class="card" style="margin-bottom:12px;">
+    <div class="label">Plan</div>
+    <div class="display" style="font-size:15.5px;margin:7px 0 5px;">${day.order.join("  →  ")}</div>
+    <div class="mono muted" style="font-size:13px;">çıkış ${day.recommendedDeparture} · varış ${day.arrival}${day.savedByOrdering ? ` · sıra +${day.savedByOrdering} dk` : ""}</div>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:15px;">
+    <div class="metric"><div class="muted" style="font-size:12.5px;">${ICON.car}Araç</div>
+      <div class="big">₺${c.totalTRY}</div>
+      <div class="faint" style="font-size:11.5px;">kapı-kapı ${r0(c.doorToDoorMin)} dk · yakıt ${c.fuelTRY}+köprü ${c.tollTRY}+otopark ${c.parkingTRY}</div></div>
+    <div class="metric"><div style="color:var(--accent-dk);font-size:12.5px;">${ICON.train}Toplu</div>
+      <div class="big" style="color:var(--accent-dk);">₺${t.fareTRY}</div>
+      <div style="font-size:11.5px;color:${t.feasible ? "var(--faint)" : "var(--warn)"};">${t.feasible ? `${t.feasibleLegs}/${t.totalLegs} bacak · ${r0(t.rideMin + t.waitMin + t.walkMin)} dk` : `${t.feasibleLegs}/${t.totalLegs} bacak · eksik bağlantı`}</div></div>
+  </div>
+  <div class="label" style="margin:0 2px 10px;">Bacaklar</div>`;
+
+  for(const leg of day.legs){
+    let opts = "";
+    if(showCar) opts += `<span class="opt car">${ICON.car}${leg.durationMin} dk · ${crossingTxt(leg)}</span>`;
+    if(showTr){
+      const tr = leg.transit;
+      if(tr && tr.feasible){
+        const ic = /Vapur/.test(tr.summary) ? ICON.ship : ICON.train;
+        opts += `<span class="opt tr">${ic}${tr.totalMin} dk · <b class="mono">₺${tr.fareTRY}</b> · ${tr.departBoard}<div class="faint" style="font-size:11px;margin-top:2px;">${tr.summary}</div></span>`;
+      } else {
+        opts += `<span class="opt no">${ICON.alert}Toplu: ${tr ? tr.note : "veri yok"}</span>`;
+      }
+    }
+    h += `<div class="leg"><div style="font-weight:500;font-size:14px;">${leg.from} → ${leg.to}</div><div class="opts">${opts}</div></div>`;
+  }
+  $("out").innerHTML = h;
+}
+
+function stopRow(name, dwell){
+  const row = document.createElement("div");
+  row.className = "srow";
+  row.innerHTML = `<input class="in sname" placeholder="durak (örn. Kadikoy)" value="${name||""}">
+    <input class="in sdwell mono" type="number" min="0" placeholder="dk" value="${dwell||""}" aria-label="bekleme dakika">
+    <button class="x" title="kaldır" aria-label="durağı kaldır">×</button>`;
+  row.querySelector(".x").onclick = () => row.remove();
+  $("stops").appendChild(row);
+}
+
+function readForm(){
+  const stops = [], dwell = {};
+  document.querySelectorAll("#stops .srow").forEach((r) => {
+    const n = r.querySelector(".sname").value.trim();
+    const d = +r.querySelector(".sdwell").value || 0;
+    if(n){ stops.push(n); if(d > 0) dwell[n] = d; }
+  });
+  return { stops, dwell, window: { start: $("winStart").value.trim(), end: $("winEnd").value.trim() }, mode: "shortest", optimizeOrder: true };
+}
+
+function banner(msg){ const b = $("banner"); if(!msg){ b.style.display = "none"; return; } b.textContent = msg; b.style.display = "block"; }
+
+async function plan(){
+  const body = readForm();
+  if(body.stops.length < 2){ banner("En az 2 durak gir."); return; }
+  banner(""); const btn = $("plan"); btn.disabled = true; btn.textContent = "Hesaplanıyor…";
+  try{
+    const res = await fetch("/day", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const day = await res.json();
+    if(!res.ok || day.error) throw new Error(day.error || ("HTTP " + res.status));
+    render(day);
+  }catch(e){
+    banner("Canlı /day çağrısı başarısız (" + e.message + "). Aşağıda örnek referans gün gösteriliyor — ücretsiz katmanda ilk istek ~30 sn sürebilir, tekrar dene.");
+    render(REF);
+  }finally{ btn.disabled = false; btn.textContent = "Planla"; }
+}
+
+$("logo").innerHTML = ICON.route;
+[["Kadikoy",0],["Besiktas",45],["Levent",30],["Maslak",60],["Kadikoy",0]].forEach(([n,d]) => stopRow(n,d));
+$("addStop").onclick = () => stopRow("",0);
+$("plan").onclick = plan;
+document.querySelectorAll("#seg button").forEach((b) => b.onclick = () => {
+  view = b.dataset.m;
+  document.querySelectorAll("#seg button").forEach((x) => x.classList.toggle("on", x === b));
+  render(lastDay);
+});
+render(REF);
+</script>
+</body>
+</html>

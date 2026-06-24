@@ -218,7 +218,7 @@ ornek: curl -s localhost:${PORT}/scan -H 'content-type: application/json' \\
 // ---- yonlendirme -------------------------------------------------
 const routes = {
   "GET /health": async () => ({ ok: true, service: "sefer", port: PORT }),
-  "GET /": async () => HELP,
+  "GET /help": async () => HELP,
 
   "POST /geocode": async (body) => {
     if (!body.q) throw new Error("q gerekli");
@@ -441,8 +441,19 @@ const routes = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const key = `${req.method} ${url.pathname}`;
+  // tarayici icin: kok yol (/) interaktif frontend'i sunar; ayni-origin oldugu icin /day'e CORS gerekmez.
+  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+    try {
+      const html = await readFile(join(__dirname, "web", "index.html"), "utf8");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return res.end(html);
+    } catch {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      return res.end(HELP);
+    }
+  }
   const handler = routes[key];
-  if (!handler) return send(res, 404, { error: "bulunamadi", path: key, hint: "GET / kullanim metni" });
+  if (!handler) return send(res, 404, { error: "bulunamadi", path: key, hint: "GET /help kullanim metni" });
   try {
     const body = req.method === "POST" ? await readBody(req) : {};
     const out = await handler(body);
