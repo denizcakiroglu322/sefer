@@ -7,8 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
-  :root{--bg:#EFEDE6;--card:#fff;--accent:#0E9F6E;--accent-dk:#0F6E56;--ink:#1A1D1A;--muted:#6B6F69;--faint:#A0A49B;--line:#ECE8E0;--chip:#F1EFE8;--warn:#9A3412;--warn-bg:#FAECE7;--tr:#E1F5EE;}
+  :root{--bg:#EFEDE6;--card:#fff;--accent:#0E9F6E;--accent-dk:#0F6E56;--ink:#1A1D1A;--muted:#6B6F69;--faint:#A0A49B;--line:#ECE8E0;--chip:#F1EFE8;--warn:#9A3412;--warn-bg:#FAECE7;--tr:#E1F5EE;--cross:#D85A30;}
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;line-height:1.5;}
   .wrap{max-width:560px;margin:0 auto;padding:26px 16px 64px;}
@@ -38,6 +39,10 @@
   .big{font-family:'JetBrains Mono';font-weight:600;font-size:22px;}
   .muted{color:var(--muted);}.faint{color:var(--faint);}
   #banner{background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;border-radius:11px;padding:10px 13px;font-size:13px;margin-bottom:12px;display:none;}
+  #map{height:320px;background:#E8E6DF;}
+  .leaflet-container{font-family:'Inter',sans-serif;}
+  .pin{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-family:'JetBrains Mono',monospace;font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(20,24,20,.35);}
+  .bridge{background:var(--cross);color:#fff;font-family:'JetBrains Mono',monospace;font-weight:600;font-size:10px;line-height:1;padding:3px 5px;border-radius:6px;border:1.5px solid #fff;text-align:center;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -76,25 +81,71 @@
     <div class="faint" style="font-size:11.5px;margin-top:11px;">Canlı API'ye bağlı. İlk istek ~30 sn sürebilir (ücretsiz katman uykudan uyanır).</div>
   </section>
 
+  <section class="card" id="mapcard" style="padding:0;overflow:hidden;margin-bottom:16px;" aria-label="Rota haritası">
+    <div id="map"></div>
+    <div class="faint" style="font-size:11px;padding:8px 14px;border-top:1px solid var(--line);">
+      <span class="mono" style="color:var(--accent);">●</span> durak sırası ·
+      <span style="color:var(--cross);">– – –</span> Boğaz geçişi ·
+      çizgiler <b>düz (haversine)</b> — gerçek yol geometrisi değil.
+    </div>
+  </section>
+
   <div id="banner" role="status"></div>
   <div id="out"></div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 const REF = {"mode":"shortest","order":["Kadikoy","Maslak","Levent","Besiktas","Kadikoy"],"recommendedDeparture":"12:00","arrival":"15:06","savedByOrdering":1.5,"legs":[{"from":"Kadikoy","to":"Maslak","durationMin":23.9,"crossing":{"id":"15temmuz","name":"15 Temmuz","direction":"A2E"},"tollTRY":59,"transit":{"feasible":true,"totalMin":69.3,"fareTRY":65.27,"departBoard":"12:15","summary":"Marmaray→M2 (aktarma: Yenikapı)"}},{"from":"Maslak","to":"Levent","durationMin":6,"crossing":null,"tollTRY":0,"transit":{"feasible":true,"totalMin":24.6,"fareTRY":42,"departBoard":"13:36","summary":"M2 (Atatürk Oto Sanayi→Levent)"}},{"from":"Levent","to":"Besiktas","durationMin":8.1,"crossing":null,"tollTRY":0,"transit":{"feasible":false,"note":"bu çift için uygun hat/vapur yok"}},{"from":"Besiktas","to":"Kadikoy","durationMin":12.6,"crossing":{"id":"15temmuz","name":"15 Temmuz","direction":"E2A"},"tollTRY":0,"transit":{"feasible":true,"totalMin":47,"fareTRY":42,"departBoard":"15:20","summary":"Vapur (Beşiktaş→Kadıköy)"}}],"modes":{"car":{"doorToDoorMin":185.6,"drivingMin":50.6,"fuelTRY":181,"tollTRY":59,"parkingTRY":150,"totalTRY":390},"transit":{"doorToDoorMin":275.9,"rideMin":74,"waitMin":40.5,"walkMin":26.4,"fareTRY":131.29,"feasibleLegs":3,"totalLegs":4,"totalTRY":131.29,"feasible":false,"note":"Levent→Besiktas: uygun hat yok"}}};
+
+const GZ = {"tuzla":[40.8155,29.3003],"sabiha gokcen":[40.8986,29.3092],"kadikoy":[40.9907,29.0245],"uskudar":[41.0265,29.0153],"atasehir":[40.9923,29.1244],"umraniye":[41.0167,29.1244],"kartal":[40.8887,29.1903],"pendik":[40.8775,29.2587],"goztepe":[40.9810,29.0610],"maslak":[41.1110,29.0190],"levent":[41.0820,29.0100],"sisli":[41.0602,28.9877],"taksim":[41.0370,28.9850],"besiktas":[41.0430,29.0090],"mecidiyekoy":[41.0670,28.9930],"bakirkoy":[40.9819,28.8772],"ist havalimani":[41.2611,28.7416],"ataturk havalimani":[40.9769,28.8146],"kazlicesme":[40.9925,28.9165],"eyup":[41.0480,28.9340],"silivri":[41.0731,28.2466]};
+const CROSS_SHORT = {"15temmuz":"15T","fsm":"FSM","yss":"YSS","avrasya":"AVR"};
+const norm = (s) => String(s||"").toLocaleLowerCase("tr-TR").replace(/i̇/g,"i").replace(/ı/g,"i").replace(/ş/g,"s").replace(/ğ/g,"g").replace(/ü/g,"u").replace(/ö/g,"o").replace(/ç/g,"c").replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim();
+const coordOf = (name) => GZ[norm(name)] || null;
 
 const SV = (p,s) => `<svg class="ico" viewBox="0 0 24 24" width="${s||16}" height="${s||16}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const ICON = {
   route: SV('<circle cx="6" cy="19" r="2.6"/><circle cx="18" cy="5" r="2.6"/><path d="M8.6 19H16a3.4 3.4 0 0 0 0-7H7a3.4 3.4 0 0 1 0-7h1.4"/>',20),
   car: SV('<path d="M5 16l1.2-4.2A2 2 0 0 1 8.1 10h7.8a2 2 0 0 1 1.9 1.4L19 16M4 16h16v3h-2v-1H6v1H4z"/><circle cx="7.5" cy="16.5" r="1.2"/><circle cx="16.5" cy="16.5" r="1.2"/>'),
-  train: SV('<rect x="6" y="3" width="12" height="12" rx="2.5"/><path d="M6 11h12M9 18l-2 3M15 18l2 3"/><circle cx="9.5" cy="7.5" r=".6"/><circle cx="14.5" cy="7.5" r=".6"/>'),
+  train: SV('<rect x="6" y="3" width="12" height="12" rx="2.5"/><path d="M6 11h12M9 18l-2 3M15 18l2 3"/>'),
   ship: SV('<path d="M3 14l9-3.5L21 14l-1.8 5.5a1.5 1.5 0 0 1-1.4 1H6.2a1.5 1.5 0 0 1-1.4-1z"/><path d="M12 10.5V5H8"/>'),
   alert: SV('<path d="M10.3 4.2 2.5 18a1.8 1.8 0 0 0 1.6 2.7h15.8A1.8 1.8 0 0 0 21.5 18L13.7 4.2a1.8 1.8 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/>')
 };
 
-let lastDay = REF, view = "compare";
+let lastDay = REF, view = "compare", map = null, mapLayer = null;
 const $ = (id) => document.getElementById(id);
 const r0 = (n) => Math.round(n);
+
+function initMap(){
+  try{
+    map = L.map("map", { scrollWheelZoom: false }).setView([41.04, 29.02], 11);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19, subdomains: "abcd", attribution: '© OpenStreetMap · © CARTO' }).addTo(map);
+    mapLayer = L.layerGroup().addTo(map);
+  }catch(e){ const el = $("mapcard"); if(el) el.style.display = "none"; }
+}
+
+function renderMap(day){
+  if(!map || !mapLayer) return;
+  mapLayer.clearLayers();
+  const seen = [];
+  day.order.forEach((name, i) => {
+    const c = coordOf(name); if(!c) return; seen.push(c);
+    L.marker(c, { icon: L.divIcon({ className: "", html: `<div class="pin">${i+1}</div>`, iconSize: [28,28], iconAnchor: [14,14] }) })
+      .addTo(mapLayer).bindTooltip(`${i+1}. ${name}`, { direction: "top", offset: [0,-12] });
+  });
+  day.legs.forEach((leg) => {
+    const a = coordOf(leg.from), b = coordOf(leg.to); if(!a || !b) return;
+    if(leg.crossing){
+      L.polyline([a,b], { color: "#D85A30", weight: 3, dashArray: "7 6", opacity: .9 }).addTo(mapLayer);
+      const mid = [(a[0]+b[0])/2, (a[1]+b[1])/2];
+      L.marker(mid, { icon: L.divIcon({ className: "", html: `<div class="bridge">${CROSS_SHORT[leg.crossing.id] || "köprü"}</div>`, iconSize: [30,18], iconAnchor: [15,9] }) })
+        .addTo(mapLayer).bindTooltip(`${leg.crossing.name} · ${leg.crossing.direction} · ₺${leg.tollTRY}`, { direction: "top" });
+    } else {
+      L.polyline([a,b], { color: "#0E9F6E", weight: 3, opacity: .85 }).addTo(mapLayer);
+    }
+  });
+  if(seen.length) map.fitBounds(seen, { padding: [34,34], maxZoom: 13 });
+}
 
 function crossingTxt(leg){
   if(!leg.crossing) return "köprü yok";
@@ -120,7 +171,6 @@ function render(day){
       <div style="font-size:11.5px;color:${t.feasible ? "var(--faint)" : "var(--warn)"};">${t.feasible ? `${t.feasibleLegs}/${t.totalLegs} bacak · ${r0(t.rideMin + t.waitMin + t.walkMin)} dk` : `${t.feasibleLegs}/${t.totalLegs} bacak · eksik bağlantı`}</div></div>
   </div>
   <div class="label" style="margin:0 2px 10px;">Bacaklar</div>`;
-
   for(const leg of day.legs){
     let opts = "";
     if(showCar) opts += `<span class="opt car">${ICON.car}${leg.durationMin} dk · ${crossingTxt(leg)}</span>`;
@@ -136,6 +186,7 @@ function render(day){
     h += `<div class="leg"><div style="font-weight:500;font-size:14px;">${leg.from} → ${leg.to}</div><div class="opts">${opts}</div></div>`;
   }
   $("out").innerHTML = h;
+  renderMap(day);
 }
 
 function stopRow(name, dwell){
@@ -184,6 +235,7 @@ document.querySelectorAll("#seg button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("#seg button").forEach((x) => x.classList.toggle("on", x === b));
   render(lastDay);
 });
+if(window.L) initMap(); else { const el = $("mapcard"); if(el) el.style.display = "none"; }
 render(REF);
 </script>
 </body>
