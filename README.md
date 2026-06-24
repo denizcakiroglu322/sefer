@@ -32,6 +32,25 @@ curl -s https://sefer-h98a.onrender.com/day \
   }'
 ```
 
+**Example response** (trimmed — real output from the live endpoint):
+
+```json
+{
+  "order": ["Kadikoy", "Maslak", "Levent", "Besiktas", "Kadikoy"],
+  "recommendedDeparture": "12:00",
+  "arrival": "15:06",
+  "savedByOrdering": 1.5,
+  "legs": [
+    { "from": "Kadikoy",  "to": "Maslak",  "durationMin": 23.9, "crossing": { "id": "15temmuz", "direction": "A2E" }, "tollTRY": 59 },
+    "… 2 intra-Europe legs: crossing null, tollTRY 0 …",
+    { "from": "Besiktas", "to": "Kadikoy", "durationMin": 12.6, "crossing": { "id": "15temmuz", "direction": "E2A" }, "tollTRY": 0 }
+  ],
+  "totals": { "drivingMin": 50.6, "dwellMin": 135, "doorToDoorMin": 185.6, "fuelTRY": 181, "tollTRY": 59, "totalTRY": 240 }
+}
+```
+
+> The return leg (`Beşiktaş→Kadıköy`, `E2A`) is **₺0** — 15 Temmuz is tolled one-way only, so the round trip costs ₺59, not ₺118. *(Free tier: the first request can take ~30 s to wake the instance.)*
+
 The response contains:
 
 - `order` — optimized stop sequence (first and last fixed, the middle re-ordered)
